@@ -35,23 +35,20 @@ API_HASH = "e193a0d9f0d2e422658a18447fa94d34"
 BOT_TOKEN = "8673149752:AAGdxrH3CKeqLLONJPdOcZY_TFKPcJrU0CY"
 
 # YAHAN APNI ID DALO
-OWNER_ID = 8538043097
+OWNER_ID = 8538043097 
 SUDO_USERS = [OWNER_ID, 987654321] 
 
-app = Client("VividUploaderPremium", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN, workers=100)
+# Workers increased to 200 for faster uploading response
+app = Client("VividUploaderPremium", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN, workers=200)
 users = {}
 running_tasks = {}
 
 # ================= AUTH CHECK =================
 
 def is_auth(message):
-    # Strict validation for both Private and Channels
     user = message.from_user
     if user:
         return user.id in SUDO_USERS
-    # If it's a channel post, check the sender_chat or linked user if available
-    if message.sender_chat:
-        return False # Blocks anonymous channel posts from non-sudos
     return False
 
 # ================= UTILITIES =================
@@ -123,8 +120,8 @@ async def start_cmd(_, message):
         "⚡ **𝗩𝗜𝗩𝗜𝗗 𝗧𝗫𝗧 𝗨𝗣𝗟𝗢𝗔𝗗𝗘𝗥 𝘃𝟯.𝟱**\n"
         "━━━━━━━━━━━━━━━━━━━━━━\n"
         "◈ **Mode:** TXT to Telegram\n"
-        "◈ **Multi-Threading:** Enabled (100 Workers)\n"
-        "◈ **Downloader:** Aria2c Cyber-Engine\n"
+        "◈ **Multi-Threading:** Enabled (200 Workers)\n"
+        "◈ **Downloader:** Aria2c Turbo-Engine\n"
         "◈ **Status:** Premium Authorized\n\n"
         "📌 **𝗖𝗼𝗺𝗺𝗮𝗻𝗱𝘀:**\n"
         "➩ /id - Get ID\n"
@@ -247,7 +244,8 @@ async def process_files(chat_id):
                 await app.send_document(chat_id, pdf_filename, caption=cap, thumb=custom_thumb); os.remove(pdf_filename)
             else:
                 current_q = chosen_quality
-                cmd = f'yt-dlp -f "bestvideo[height<={current_q}]+bestaudio/best[height<={current_q}]/best" --external-downloader aria2c --external-downloader-args "aria2c:-x 16 -s 16 -j 32 -k 1M" --merge-output-format mp4 --no-check-certificate "{url}" -o "{video_filename}"'
+                # TURBO DOWNLOAD SETTINGS
+                cmd = f'yt-dlp -f "bestvideo[height<={current_q}]+bestaudio/best[height<={current_q}]/best" --external-downloader aria2c --external-downloader-args "aria2c:-x 16 -s 16 -k 1M --min-split-size=1M" --merge-output-format mp4 --no-check-certificate "{url}" -o "{video_filename}"'
                 process = await asyncio.create_subprocess_shell(cmd); await process.communicate()
                 
                 if os.path.exists(video_filename):
@@ -274,7 +272,7 @@ async def process_files(chat_id):
 async def main():
     keep_alive()
     await app.start()
-    print("💎 VIVID CYBER-CORE IS ONLINE")
+    print("💎 VIVID CYBER-CORE IS ONLINE (TURBO MODE)")
     await idle()
 
 if __name__ == "__main__":
