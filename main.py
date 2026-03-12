@@ -33,16 +33,27 @@ API_ID = 32799376
 API_HASH = "e193a0d9f0d2e422658a18447fa94d34" 
 BOT_TOKEN = "8673149752:AAGdxrH3CKeqLLONJPdOcZY_TFKPcJrU0CY"
 
-app = Client("VividUploaderPremium", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
+# YAHAN APNI ID DALO
+OWNER_ID = 8538043097 # <--- Apni Telegram ID yahan likho
+SUDO_USERS = [OWNER_ID] # Ismein aur IDs add kar sakte ho [OWNER_ID, 123, 456]
+
+# Workers=100 se uploading speed boost hogi
+app = Client("VividUploaderPremium", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN, workers=100)
 users = {}
 running_tasks = {}
+
+# ================= AUTH CHECK =================
+
+def is_auth(user_id):
+    return user_id in SUDO_USERS
 
 # ================= UTILITIES =================
 
 async def progress_bar(current, total, status_msg, topic, start_time, file_count_info):
     now = time.time()
     diff = now - start_time
-    if round(diff % 20.0) == 0 or current == total:
+    # Optimized update frequency for better speed performance
+    if round(diff % 10.0) == 0 or current == total:
         percentage = current * 100 / total
         speed = current / diff if diff > 0 else 0
         eta = round((total - current) / speed) * 1000 if speed > 0 else 0
@@ -99,10 +110,22 @@ def clean_filename(name):
 
 @app.on_message(filters.command("start"))
 async def start_cmd(_, message):
+    if not is_auth(message.from_user.id):
+        return await message.reply_text("❌ **Access Denied.**\nContact owner for permission.")
     await message.reply_text("⚡ **𝗩𝗜𝗩𝗜𝗗 𝗧𝗫𝗧 𝗨𝗣𝗟𝗢𝗔𝗗𝗘𝗥 𝘃𝟯.𝟬**\n━━━━━━━━━━━━━━━━━━━━━━\n◈ _System status: Online_\n◈ _Ready for decryption._\n\n📥 **Please drop your .txt file to initiate.**")
+
+@app.on_message(filters.command("add_sudo") & filters.user(OWNER_ID))
+async def add_sudo_cmd(_, message):
+    try:
+        user_id = int(message.text.split()[1])
+        if user_id not in SUDO_USERS:
+            SUDO_USERS.append(user_id)
+            await message.reply_text(f"✅ User `{user_id}` added to Sudo.")
+    except: await message.reply_text("Usage: `/add_sudo 12345`")
 
 @app.on_message(filters.command("cancel"))
 async def cancel_cmd(_, message):
+    if not is_auth(message.from_user.id): return
     chat_id = message.chat.id
     if chat_id in running_tasks:
         running_tasks[chat_id] = False
@@ -114,6 +137,7 @@ async def cancel_cmd(_, message):
 
 @app.on_message(filters.document)
 async def handle_txt(_, message):
+    if not is_auth(message.from_user.id): return
     if not message.document.file_name.endswith(".txt"):
         return await message.reply_text("❌ **Invalid format. TXT extension required.**")
     chat_id = message.chat.id
@@ -129,8 +153,9 @@ async def handle_txt(_, message):
 
 # ================= INPUT STEPS =================
 
-@app.on_message((filters.text | filters.photo) & ~filters.command(["start", "cancel"]))
+@app.on_message((filters.text | filters.photo) & ~filters.command(["start", "cancel", "add_sudo"]))
 async def steps_handler(_, message):
+    if not is_auth(message.from_user.id): return
     chat_id = message.chat.id
     if chat_id not in users: return
     state = users[chat_id]
@@ -196,11 +221,13 @@ async def process_files(chat_id):
                 await app.send_document(chat_id, pdf_filename, caption=cap, thumb=custom_thumb); os.remove(pdf_filename)
             else:
                 current_q = chosen_quality
-                cmd = f'yt-dlp -f "bestvideo[height<={current_q}]+bestaudio/best[height<={current_q}]/best" --external-downloader aria2c --external-downloader-args "aria2c:-x 16 -s 16 -k 1M" --merge-output-format mp4 --no-check-certificate "{url}" -o "{video_filename}"'
+                # Optimized aria2c arguments for massive speed boost
+                cmd = f'yt-dlp -f "bestvideo[height<={current_q}]+bestaudio/best[height<={current_q}]/best" --external-downloader aria2c --external-downloader-args "aria2c:-x 16 -s 16 -j 32 -k 1M" --merge-output-format mp4 --no-check-certificate "{url}" -o "{video_filename}"'
                 process = await asyncio.create_subprocess_shell(cmd); await process.communicate()
+                
                 if os.path.exists(video_filename) and os.path.getsize(video_filename) > 2000 * 1024 * 1024:
                     if os.path.exists(video_filename): os.remove(video_filename)
-                    cmd_downscale = f'yt-dlp -f "bestvideo[height<=480]+bestaudio/best[height<=480]/best" --external-downloader aria2c --external-downloader-args "aria2c:-x 16 -s 16 -k 1M" --merge-output-format mp4 --no-check-certificate "{url}" -o "{video_filename}"'
+                    cmd_downscale = f'yt-dlp -f "bestvideo[height<=480]+bestaudio/best[height<=480]/best" --external-downloader aria2c --external-downloader-args "aria2c:-x 16 -s 16 -j 32 -k 1M" --merge-output-format mp4 --no-check-certificate "{url}" -o "{video_filename}"'
                     process = await asyncio.create_subprocess_shell(cmd_downscale); await process.communicate()
 
                 if os.path.exists(video_filename):
@@ -209,6 +236,7 @@ async def process_files(chat_id):
                     start_time = time.time()
                     while True:
                         try:
+                            # Workers=100 will handle this upload much faster
                             await app.send_video(chat_id, video=video_filename, caption=cap, duration=dur, thumb=final_thumb, supports_streaming=True, progress=progress_bar, progress_args=(status, topic, start_time, file_count_info))
                             break
                         except FloodWait as e: await asyncio.sleep(e.value)
