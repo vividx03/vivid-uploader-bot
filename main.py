@@ -215,7 +215,6 @@ async def process_files(chat_id):
     state = users[chat_id]; all_links = state["links"]; start_idx = state["index"]
     links_to_process = all_links[start_idx-1:]; total_to_process = len(links_to_process)
     curr_idx = start_idx; custom_thumb = state["thumb"]; chosen_quality = state["quality"]
-    failed_links_report = [] 
     status = await app.send_message(chat_id, "⚙️ **𝗜𝗡𝗜𝗧𝗜𝗔𝗧𝗜𝗡𝗚 𝗦𝗘𝗤𝗨𝗘𝗡𝗖𝗘...**")
 
     for i, line in enumerate(links_to_process, start=1):
@@ -230,8 +229,9 @@ async def process_files(chat_id):
                 url = re.search(r'http\S+', parts[1]).group()
             else: topic = f"File_{curr_idx}"; url = re.search(r'http\S+', line).group()
         except: 
-            # FIX: Index management for failed extractions
-            failed_links_report.append(f"index no : {curr_idx}\ntopic name : {line}\nfailed link : Not Extracted")
+            # Instant Failed message for invalid links
+            failed_text = f"❌ **FAILED LINKS REPORT**\n\n📙 **Index :** `{curr_idx}`\n\n📝 **Topic :** `{line}`\n\n🔗 **Failed Link :** `Invalid URL Format`"
+            await app.send_message(chat_id, failed_text)
             curr_idx += 1; continue
 
         file_count_info = f"{i}/{total_to_process}"
@@ -268,27 +268,20 @@ async def process_files(chat_id):
                         await app.send_video(chat_id, video=video_filename, caption=cap, duration=dur, thumb=final_thumb, supports_streaming=True, progress=progress_bar, progress_args=(status, topic, start_time, file_count_info, chat_id))
                     except: pass
                 else: 
-                    # FIX: Link failed to download, adding to report
-                    failed_links_report.append(f"index no : {curr_idx}\ntopic name : {topic}\nfailed link : {url}")
+                    # Instant Failed message if download fails
+                    failed_text = f"❌ **FAILED LINKS REPORT**\n\n📙 **Index :** `{curr_idx}`\n\n📝 **Topic :** `{topic}`\n\n🔗 **Failed Link :** `{url}`"
+                    await app.send_message(chat_id, failed_text)
         except Exception as e: 
-            failed_links_report.append(f"index no : {curr_idx}\ntopic name : {topic}\nfailed link : {url}")
+            # Instant Failed message for exceptions
+            failed_text = f"❌ **FAILED LINKS REPORT**\n\n📙 **Index :** `{curr_idx}`\n\n📝 **Topic :** `{topic}`\n\n🔗 **Failed Link :** `{url}`"
+            await app.send_message(chat_id, failed_text)
         
-        # SUCCESS OR FAIL: Always increment index and cleanup
         curr_idx += 1
         shutil.rmtree(work_dir, ignore_errors=True)
 
     if custom_thumb and os.path.exists(custom_thumb): os.remove(custom_thumb)
     try: await status.delete()
     except: pass
-
-    if failed_links_report:
-        report_msg = "❌ **FAILED LINKS REPORT**\n\n" + "\n\n".join(failed_links_report)
-        if len(report_msg) > 4000:
-            with open(f"failed_{chat_id}.txt", "w") as f: f.write(report_msg)
-            await app.send_document(chat_id, f"failed_{chat_id}.txt", caption="❌ **Failed Links Report**")
-            os.remove(f"failed_{chat_id}.txt")
-        else:
-            await app.send_message(chat_id, report_msg)
 
     if running_tasks.get(chat_id):
         await app.send_message(chat_id, "𝗧𝗵𝗮𝘁'𝘀 𝗶𝘁 ❤️")
