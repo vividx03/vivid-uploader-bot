@@ -7,6 +7,7 @@ import re
 import time
 import math
 import shutil
+import signal
 from pyrogram import Client, filters, idle
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove
 from pyrogram.errors import FloodWait
@@ -35,13 +36,14 @@ API_HASH = "e193a0d9f0d2e422658a18447fa94d34"
 BOT_TOKEN = "8673149752:AAGdxrH3CKeqLLONJPdOcZY_TFKPcJrU0CY"
 
 # YAHAN APNI ID DALO
-OWNER_ID = 8538043097 
+OWNER_ID = 8538043097
 SUDO_USERS = [OWNER_ID, 987654321] 
 
-# Workers increased to 200 for faster uploading response
-app = Client("VividUploaderPremium", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN, workers=200)
+# Workers set to 300 for extreme concurrency
+app = Client("VividUploaderPremium", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN, workers=300)
 users = {}
 running_tasks = {}
+active_processes = {} # Strictly for cancelling background tasks
 
 # ================= AUTH CHECK =================
 
@@ -53,10 +55,14 @@ def is_auth(message):
 
 # ================= UTILITIES =================
 
-async def progress_bar(current, total, status_msg, topic, start_time, file_count_info):
+async def progress_bar(current, total, status_msg, topic, start_time, file_count_info, chat_id):
+    # Strictly stop uploading progress if cancelled
+    if not running_tasks.get(chat_id):
+        raise Exception("Task Cancelled")
+        
     now = time.time()
     diff = now - start_time
-    if round(diff % 10.0) == 0 or current == total:
+    if round(diff % 5.0) == 0 or current == total:
         percentage = current * 100 / total
         speed = current / diff if diff > 0 else 0
         eta = round((total - current) / speed) * 1000 if speed > 0 else 0
@@ -114,19 +120,15 @@ def clean_filename(name):
 @app.on_message(filters.command("start"))
 async def start_cmd(_, message):
     if not is_auth(message):
-        return await message.reply_text("❌ **Access Denied.**\nContact owner for permission.")
+        return await message.reply_text("❌ **Access Denied.**")
     
     desc = (
         "⚡ **𝗩𝗜𝗩𝗜𝗗 𝗧𝗫𝗧 𝗨𝗣𝗟𝗢𝗔𝗗𝗘𝗥 𝘃𝟯.𝟱**\n"
         "━━━━━━━━━━━━━━━━━━━━━━\n"
-        "◈ **Mode:** TXT to Telegram\n"
-        "◈ **Multi-Threading:** Enabled (200 Workers)\n"
-        "◈ **Downloader:** Aria2c Turbo-Engine\n"
-        "◈ **Status:** Premium Authorized\n\n"
-        "📌 **𝗖𝗼𝗺𝗺𝗮𝗻𝗱𝘀:**\n"
-        "➩ /id - Get ID\n"
-        "➩ /cancel - Stop processing\n\n"
-        "📥 **Send me a .txt file to begin.**"
+        "◈ **Mode:** Turbo Multi-Tasking\n"
+        "◈ **Downloader:** Aria2c Turbo\n"
+        "◈ **Status:** Authorized ✅\n\n"
+        "📥 **Send me a .txt file.**"
     )
     await message.reply_text(desc)
 
@@ -140,19 +142,22 @@ async def cancel_cmd(_, message):
     chat_id = message.chat.id
     if chat_id in running_tasks:
         running_tasks[chat_id] = False
+        # STRICT KILL: Kill the background yt-dlp/aria2c process
+        if chat_id in active_processes:
+            try:
+                active_processes[chat_id].terminate()
+                active_processes[chat_id].kill()
+            except: pass
         await message.reply_text("🛑 **𝗣𝗥𝗢𝗖𝗘𝗦𝗦 𝗧𝗘𝗥𝗠𝗜𝗡𝗔𝗧𝗘𝗗.**")
     else:
-        await message.reply_text("⚠️ **No active uplink found.**")
+        await message.reply_text("⚠️ **No active task here.**")
 
 # ================= TXT HANDLING =================
 
 @app.on_message(filters.document)
 async def handle_txt(_, message):
-    if not is_auth(message):
-        return await message.reply_text("❌ **Access Denied.**\nContact owner for permission.")
-    
-    if not message.document.file_name.endswith(".txt"):
-        return await message.reply_text("❌ **TXT extension required.**")
+    if not is_auth(message): return
+    if not message.document.file_name.endswith(".txt"): return
     
     chat_id = message.chat.id
     path = await message.download()
@@ -174,6 +179,7 @@ async def steps_handler(_, message):
     if chat_id not in users: return
     state = users[chat_id]
     state["trash"].append(message.id)
+    
     if state["step"] == "index":
         try:
             state["index"] = int(message.text)
@@ -215,11 +221,7 @@ async def process_files(chat_id):
     for i, line in enumerate(links_to_process, start=1):
         if not running_tasks.get(chat_id): break
         
-        if os.path.exists("downloads"): shutil.rmtree("downloads", ignore_errors=True)
-        for f in os.listdir("."):
-            if f.endswith((".mp4", ".pdf", ".jpg")) and "_vivid" in f: 
-                try: os.remove(f)
-                except: pass
+        if os.path.exists(f"downloads_{chat_id}"): shutil.rmtree(f"downloads_{chat_id}", ignore_errors=True)
 
         try:
             if ":" in line and "http" in line:
@@ -230,7 +232,10 @@ async def process_files(chat_id):
 
         file_count_info = f"{i}/{total_to_process}"
         await update_status(status, f"🛰 **𝗗𝗢𝗪𝗡𝗟𝗢𝗔𝗗𝗜𝗡𝗚 ({file_count_info})**\n📂 `{topic}`")
-        safe_topic = clean_filename(topic); video_filename = f"{safe_topic}_vivid.mp4"; pdf_filename = f"{safe_topic}_vivid.pdf"
+        
+        safe_topic = clean_filename(topic)
+        video_filename = f"{safe_topic}_vivid.mp4"
+        pdf_filename = f"{safe_topic}_vivid.pdf"
         cap = (f"📙 **Index :** `{curr_idx}`\n\n📝 **Topic :** `{topic}`\n\n📚 **COURSE :-** `{state['batch']}`\n\n📤 **𝐄𝐗𝐓𝐑𝐀𝐂𝐓𝐄𝐃 𝐁𝐘 : {state['extracted']}**")
 
         try:
@@ -241,38 +246,54 @@ async def process_files(chat_id):
             elif ".pdf" in url.lower():
                 r = requests.get(url, timeout=30)
                 with open(pdf_filename, "wb") as f: f.write(r.content)
-                await app.send_document(chat_id, pdf_filename, caption=cap, thumb=custom_thumb); os.remove(pdf_filename)
+                await app.send_document(chat_id, pdf_filename, caption=cap, thumb=custom_thumb)
+                if os.path.exists(pdf_filename): os.remove(pdf_filename)
             else:
-                current_q = chosen_quality
-                # TURBO DOWNLOAD SETTINGS
-                cmd = f'yt-dlp -f "bestvideo[height<={current_q}]+bestaudio/best[height<={current_q}]/best" --external-downloader aria2c --external-downloader-args "aria2c:-x 16 -s 16 -k 1M --min-split-size=1M" --merge-output-format mp4 --no-check-certificate "{url}" -o "{video_filename}"'
-                process = await asyncio.create_subprocess_shell(cmd); await process.communicate()
+                cmd = f'yt-dlp -f "bestvideo[height<={chosen_quality}]+bestaudio/best" --external-downloader aria2c --external-downloader-args "aria2c:-x 16 -s 16 -j 32 -k 1M --min-split-size=1M" --merge-output-format mp4 --no-check-certificate "{url}" -o "{video_filename}"'
                 
+                # Registering process for Strict Cancel
+                process = await asyncio.create_subprocess_shell(cmd)
+                active_processes[chat_id] = process
+                await process.communicate()
+                active_processes.pop(chat_id, None)
+                
+                if not running_tasks.get(chat_id): break # Double check after download
+
                 if os.path.exists(video_filename):
                     dur, auto_thumb = get_video_info(video_filename)
                     final_thumb = custom_thumb if custom_thumb else auto_thumb
                     start_time = time.time()
+                    
                     while True:
                         try:
-                            await app.send_video(chat_id, video=video_filename, caption=cap, duration=dur, thumb=final_thumb, supports_streaming=True, progress=progress_bar, progress_args=(status, topic, start_time, file_count_info))
+                            # Pass chat_id to progress_bar for cancel check
+                            await app.send_video(chat_id, video=video_filename, caption=cap, duration=dur, thumb=final_thumb, supports_streaming=True, progress=progress_bar, progress_args=(status, topic, start_time, file_count_info, chat_id))
                             break
-                        except FloodWait as e: await asyncio.sleep(e.value)
+                        except Exception as e:
+                            if "Task Cancelled" in str(e): break
+                            if isinstance(e, FloodWait): await asyncio.sleep(e.value)
+                            else: break
+                    
                     if os.path.exists(video_filename): os.remove(video_filename)
                     if auto_thumb and os.path.exists(auto_thumb): os.remove(auto_thumb)
-                else: await app.send_message(chat_id, f"❌ **Failed:** {topic}")
-        except Exception as e: await app.send_message(chat_id, f"⚠️ **Error:** `{str(e)[:100]}`")
+                else: 
+                    if running_tasks.get(chat_id): await app.send_message(chat_id, f"❌ **Failed:** {topic}")
+        except Exception as e: 
+            if running_tasks.get(chat_id): await app.send_message(chat_id, f"⚠️ **Error:** `{str(e)[:100]}`")
+        
         curr_idx += 1
 
     if custom_thumb and os.path.exists(custom_thumb): os.remove(custom_thumb)
     try: await status.delete()
     except: pass
-    await app.send_message(chat_id, "𝗧𝗵𝗮𝘁'𝘀 𝗶𝘁 ❤️")
+    if running_tasks.get(chat_id):
+        await app.send_message(chat_id, "𝗧𝗵𝗮𝘁'𝘀 𝗶𝘁 ❤️")
     running_tasks.pop(chat_id, None)
 
 async def main():
     keep_alive()
     await app.start()
-    print("💎 VIVID CYBER-CORE IS ONLINE (TURBO MODE)")
+    print("💎 VIVID TURBO CORE IS ONLINE (CANCEL FIXED)")
     await idle()
 
 if __name__ == "__main__":
