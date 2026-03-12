@@ -6,6 +6,7 @@ import requests
 import re
 import time
 import math
+import shutil
 from pyrogram import Client, filters, idle
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove
 from pyrogram.errors import FloodWait
@@ -33,11 +34,10 @@ API_ID = 32799376
 API_HASH = "e193a0d9f0d2e422658a18447fa94d34" 
 BOT_TOKEN = "8673149752:AAGdxrH3CKeqLLONJPdOcZY_TFKPcJrU0CY"
 
-# YAHAN APNI ID DALO
-OWNER_ID = 8538043097 # <--- Apni Telegram ID yahan likho
-SUDO_USERS = [OWNER_ID] # Ismein aur IDs add kar sakte ho [OWNER_ID, 123, 456]
+OWNER_ID = 8538043097 # <--- APNI ID DALO
+SUDO_USERS = [OWNER_ID]
+AUTHORIZED_CHANNELS = [] # Ismein channels ki ID save hogi
 
-# Workers=100 se uploading speed boost hogi
 app = Client("VividUploaderPremium", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN, workers=100)
 users = {}
 running_tasks = {}
@@ -52,7 +52,6 @@ def is_auth(user_id):
 async def progress_bar(current, total, status_msg, topic, start_time, file_count_info):
     now = time.time()
     diff = now - start_time
-    # Optimized update frequency for better speed performance
     if round(diff % 10.0) == 0 or current == total:
         percentage = current * 100 / total
         speed = current / diff if diff > 0 else 0
@@ -108,20 +107,48 @@ def clean_filename(name):
 
 # ================= COMMANDS =================
 
-@app.on_message(filters.command("start"))
+@app.on_message(filters.command("start") & filters.private)
 async def start_cmd(_, message):
     if not is_auth(message.from_user.id):
-        return await message.reply_text("❌ **Access Denied.**\nContact owner for permission.")
-    await message.reply_text("⚡ **𝗩𝗜𝗩𝗜𝗗 𝗧𝗫𝗧 𝗨𝗣𝗟𝗢𝗔𝗗𝗘𝗥 𝘃𝟯.𝟬**\n━━━━━━━━━━━━━━━━━━━━━━\n◈ _System status: Online_\n◈ _Ready for decryption._\n\n📥 **Please drop your .txt file to initiate.**")
+        return await message.reply_text("❌ **Access Denied.**")
+    
+    desc = (
+        "⚡ **𝗩𝗜𝗩𝗜𝗗 𝗧𝗫𝗧 𝗨𝗣𝗟𝗢𝗔𝗗𝗘𝗥 𝘃𝟯.𝟱**\n"
+        "━━━━━━━━━━━━━━━━━━━━━━\n"
+        "◈ **Mode:** TXT to Telegram\n"
+        "◈ **Multi-Threading:** Enabled (100 Workers)\n"
+        "◈ **Downloader:** Aria2c Cyber-Engine\n"
+        "◈ **Restriction:** Authorized Channels Only\n\n"
+        "📌 **𝗖𝗼𝗺𝗺𝗮𝗻𝗱𝘀:**\n"
+        "➩ /add_channel [ID] - Add Auth Channel\n"
+        "➩ /remove_channel [ID] - Remove Channel\n"
+        "➩ /id - Get Channel/Chat ID\n"
+        "➩ /cancel - Stop processing\n\n"
+        "📥 **Send me a .txt file to begin.**"
+    )
+    await message.reply_text(desc)
 
-@app.on_message(filters.command("add_sudo") & filters.user(OWNER_ID))
-async def add_sudo_cmd(_, message):
+@app.on_message(filters.command("id"))
+async def get_id(_, message):
+    await message.reply_text(f"🆔 **ID:** `{message.chat.id}`")
+
+@app.on_message(filters.command("add_channel") & filters.user(SUDO_USERS))
+async def add_channel_cmd(_, message):
     try:
-        user_id = int(message.text.split()[1])
-        if user_id not in SUDO_USERS:
-            SUDO_USERS.append(user_id)
-            await message.reply_text(f"✅ User `{user_id}` added to Sudo.")
-    except: await message.reply_text("Usage: `/add_sudo 12345`")
+        c_id = int(message.text.split()[1])
+        if c_id not in AUTHORIZED_CHANNELS:
+            AUTHORIZED_CHANNELS.append(c_id)
+            await message.reply_text(f"✅ **Channel Added:** `{c_id}`")
+    except: await message.reply_text("Usage: `/add_channel -100xxxxxx`")
+
+@app.on_message(filters.command("remove_channel") & filters.user(SUDO_USERS))
+async def remove_channel_cmd(_, message):
+    try:
+        c_id = int(message.text.split()[1])
+        if c_id in AUTHORIZED_CHANNELS:
+            AUTHORIZED_CHANNELS.remove(c_id)
+            await message.reply_text(f"🗑 **Channel Removed.**")
+    except: await message.reply_text("Usage: `/remove_channel -100xxxxxx`")
 
 @app.on_message(filters.command("cancel"))
 async def cancel_cmd(_, message):
@@ -129,7 +156,7 @@ async def cancel_cmd(_, message):
     chat_id = message.chat.id
     if chat_id in running_tasks:
         running_tasks[chat_id] = False
-        await message.reply_text("🛑 **𝗣𝗥𝗢𝗖𝗘𝗦𝗦 𝗧𝗘𝗥𝗠𝗜𝗡𝗔𝗧𝗘𝗗.**\n_System sequence stopped by operator._")
+        await message.reply_text("🛑 **𝗣𝗥𝗢𝗖𝗘𝗦𝗦 𝗧𝗘𝗥𝗠𝗜𝗡𝗔𝗧𝗘𝗗.**")
     else:
         await message.reply_text("⚠️ **No active uplink found.**")
 
@@ -138,8 +165,12 @@ async def cancel_cmd(_, message):
 @app.on_message(filters.document)
 async def handle_txt(_, message):
     if not is_auth(message.from_user.id): return
+    if message.chat.id not in AUTHORIZED_CHANNELS and message.chat.type != "private":
+        return await message.reply_text("❌ **This channel is not authorized.**")
+    
     if not message.document.file_name.endswith(".txt"):
-        return await message.reply_text("❌ **Invalid format. TXT extension required.**")
+        return await message.reply_text("❌ **TXT extension required.**")
+    
     chat_id = message.chat.id
     path = await message.download()
     with open(path, "r", encoding="utf-8") as f:
@@ -147,13 +178,13 @@ async def handle_txt(_, message):
     links = [l.strip() for l in content.splitlines() if "http" in l]
     vids = len([l for l in links if any(x in l.lower() for x in [".m3u8", ".mp4", "youtu"])])
     pdfs = len([l for l in links if ".pdf" in l.lower()])
-    users[chat_id] = {"links": links, "step": "index", "total_v": vids, "total_p": pdfs, "trash": [message.id]}
-    msg = await message.reply_text(f"📊 **𝗗𝗔𝗧𝗔 𝗔𝗡𝗔𝗟𝗬𝗦𝗜𝗦 𝗖𝗢𝗠𝗣𝗟𝗘𝗧𝗘**\n━━━━━━━━━━━━━━━━━━━━━━\n✅ **𝗧𝗼𝘁𝗮𝗹 𝗨𝗥𝗟𝘀:** `{len(links)}` \n📹 **𝗩𝗶𝗱𝗲𝗼𝘀:** `{vids}` \n📄 **𝗣𝗗𝗙𝘀:** `{pdfs}`\n\n🔢 **𝗘𝗻𝘁𝗲𝗿 𝘀𝘁𝗮𝗿𝘁𝗶𝗻𝗴 𝗶𝗻𝗱𝗲𝘅:**")
+    users[chat_id] = {"links": links, "step": "index", "total_v": vids, "total_p": pdfs, "trash": [message.id, path]}
+    msg = await message.reply_text(f"📊 **𝗗𝗔𝗧𝗔 𝗔𝗡𝗔𝗟𝗬𝗦𝗜𝗦**\n━━━━━━━━━━━━━━━━━━━━━━\n✅ **𝗧𝗼𝘁𝗮𝗹:** `{len(links)}` \n📹 **𝗩𝗶𝗱𝗲𝗼𝘀:** `{vids}` \n📄 **𝗣𝗗𝗙𝘀:** `{pdfs}`\n\n🔢 **𝗘𝗻𝘁𝗲𝗿 𝘀𝘁𝗮𝗿𝘁𝗶𝗻𝗴 𝗶𝗻𝗱𝗲𝘅:**")
     users[chat_id]["trash"].append(msg.id)
 
 # ================= INPUT STEPS =================
 
-@app.on_message((filters.text | filters.photo) & ~filters.command(["start", "cancel", "add_sudo"]))
+@app.on_message((filters.text | filters.photo) & ~filters.command(["start", "cancel", "add_channel", "remove_channel", "id"]))
 async def steps_handler(_, message):
     if not is_auth(message.from_user.id): return
     chat_id = message.chat.id
@@ -165,7 +196,7 @@ async def steps_handler(_, message):
             state["index"] = int(message.text)
             state["step"] = "batch"; msg = await message.reply_text("📚 **𝗘𝗻𝘁𝗲𝗿 𝗖𝗼𝘂𝗿𝘀𝗲 𝗡𝗮𝗺𝗲:**")
             state["trash"].append(msg.id)
-        except: await message.reply_text("❌ **Format error. Send an integer.**")
+        except: await message.reply_text("❌ **Send an integer.**")
     elif state["step"] == "batch":
         state["batch"] = message.text; state["step"] = "extracted"
         msg = await message.reply_text("📤 **𝗘𝗻𝘁𝗲𝗿 '𝗘𝘅𝘁𝗿𝗮𝗰𝘁𝗲𝗱 𝗕𝘆' 𝗡𝗮𝗺𝗲:**")
@@ -177,13 +208,13 @@ async def steps_handler(_, message):
         state["trash"].append(msg.id)
     elif state["step"] == "quality":
         state["quality"] = message.text.replace("p", ""); state["step"] = "thumb"
-        msg = await message.reply_text("🖼 **𝗨𝗽𝗹𝗼𝗮𝗱 𝗖𝘂𝘀𝘁𝗼𝗺 𝗧𝗵𝘂𝗺𝗯𝗻𝗮𝗶𝗹**\n_or type 'no' for default logic:_", reply_markup=ReplyKeyboardRemove())
+        msg = await message.reply_text("🖼 **𝗨𝗽𝗹𝗼𝗮𝗱 𝗖𝘂𝘀𝘁𝗼𝗺 𝗧𝗵𝘂𝗺𝗯𝗻𝗮𝗶𝗹** or 'no':", reply_markup=ReplyKeyboardRemove())
         state["trash"].append(msg.id)
     elif state["step"] == "thumb":
         if message.photo: state["thumb"] = await message.download(file_name=f"thumb_{chat_id}.jpg")
         else: state["thumb"] = None
         for m_id in state["trash"]:
-            try: await app.delete_messages(chat_id, m_id)
+            try: await app.delete_messages(chat_id, m_id) if isinstance(m_id, int) else os.remove(m_id)
             except: pass
         running_tasks[chat_id] = True
         asyncio.create_task(process_files(chat_id))
@@ -198,6 +229,9 @@ async def process_files(chat_id):
 
     for i, line in enumerate(links_to_process, start=1):
         if not running_tasks.get(chat_id): break
+        # Speed Maintenance: Clear cache before each download
+        if os.path.exists("downloads"): shutil.rmtree("downloads", ignore_errors=True)
+        
         try:
             if ":" in line and "http" in line:
                 parts = line.split(":", 1); topic = parts[0].strip()
@@ -206,7 +240,7 @@ async def process_files(chat_id):
         except: curr_idx += 1; continue
 
         file_count_info = f"{i}/{total_to_process}"
-        await update_status(status, f"🛰 **𝗗𝗢𝗪𝗡𝗟𝗢𝗔𝗗𝗜𝗡𝗚 𝗗𝗔𝗧𝗔 ({file_count_info})**\n📂 `{topic}`")
+        await update_status(status, f"🛰 **𝗗𝗢𝗪𝗡𝗟𝗢𝗔𝗗𝗜𝗡𝗚 ({file_count_info})**\n📂 `{topic}`")
         safe_topic = clean_filename(topic); video_filename = f"{safe_topic}_vivid.mp4"; pdf_filename = f"{safe_topic}_vivid.pdf"
         cap = (f"📙 **Index :** `{curr_idx}`\n\n📝 **Topic :** `{topic}`\n\n📚 **COURSE :-** `{state['batch']}`\n\n📤 **𝐄𝐗𝐓𝐑𝐀𝐂𝐓𝐄𝐃 𝐁𝐘 : {state['extracted']}**")
 
@@ -221,30 +255,25 @@ async def process_files(chat_id):
                 await app.send_document(chat_id, pdf_filename, caption=cap, thumb=custom_thumb); os.remove(pdf_filename)
             else:
                 current_q = chosen_quality
-                # Optimized aria2c arguments for massive speed boost
-                cmd = f'yt-dlp -f "bestvideo[height<={current_q}]+bestaudio/best[height<={current_q}]/best" --external-downloader aria2c --external-downloader-args "aria2c:-x 16 -s 16 -j 32 -k 1M" --merge-output-format mp4 --no-check-certificate "{url}" -o "{video_filename}"'
+                # Aria2c arguments tuned for stability and speed
+                cmd = f'yt-dlp -f "bestvideo[height<={current_q}]+bestaudio/best[height<={current_q}]/best" --external-downloader aria2c --external-downloader-args "aria2c:-x 16 -s 16 -j 32 -k 1M --disk-cache=25M" --merge-output-format mp4 --no-check-certificate "{url}" -o "{video_filename}"'
                 process = await asyncio.create_subprocess_shell(cmd); await process.communicate()
                 
-                if os.path.exists(video_filename) and os.path.getsize(video_filename) > 2000 * 1024 * 1024:
-                    if os.path.exists(video_filename): os.remove(video_filename)
-                    cmd_downscale = f'yt-dlp -f "bestvideo[height<=480]+bestaudio/best[height<=480]/best" --external-downloader aria2c --external-downloader-args "aria2c:-x 16 -s 16 -j 32 -k 1M" --merge-output-format mp4 --no-check-certificate "{url}" -o "{video_filename}"'
-                    process = await asyncio.create_subprocess_shell(cmd_downscale); await process.communicate()
-
                 if os.path.exists(video_filename):
                     dur, auto_thumb = get_video_info(video_filename)
                     final_thumb = custom_thumb if custom_thumb else auto_thumb
                     start_time = time.time()
                     while True:
                         try:
-                            # Workers=100 will handle this upload much faster
                             await app.send_video(chat_id, video=video_filename, caption=cap, duration=dur, thumb=final_thumb, supports_streaming=True, progress=progress_bar, progress_args=(status, topic, start_time, file_count_info))
                             break
                         except FloodWait as e: await asyncio.sleep(e.value)
+                    # Instant cleaning for speed retention
                     if os.path.exists(video_filename): os.remove(video_filename)
                     if auto_thumb and os.path.exists(auto_thumb): os.remove(auto_thumb)
-                else: await app.send_message(chat_id, f"❌ **𝗠𝗶𝘀𝘀𝗶𝗼𝗻 𝗙𝗮𝗶𝗹𝗲𝗱:** {topic}")
-        except Exception as e: await app.send_message(chat_id, f"⚠️ **𝗘𝗿𝗿𝗼𝗿:** `{str(e)[:100]}`")
-        curr_idx += 1; await asyncio.sleep(1)
+                else: await app.send_message(chat_id, f"❌ **Failed:** {topic}")
+        except Exception as e: await app.send_message(chat_id, f"⚠️ **Error:** `{str(e)[:100]}`")
+        curr_idx += 1
 
     if custom_thumb and os.path.exists(custom_thumb): os.remove(custom_thumb)
     try: await status.delete()
@@ -254,7 +283,7 @@ async def process_files(chat_id):
 
 # --- EXECUTION ---
 async def main():
-    keep_alive() # Start Flask
+    keep_alive()
     await app.start()
     print("💎 VIVID CYBER-CORE IS ONLINE")
     await idle()
