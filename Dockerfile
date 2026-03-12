@@ -1,4 +1,4 @@
-FROM python:3.10-slim-buster
+FROM python:3.10-slim
 
 # Install System Packages (FFmpeg & Aria2)
 RUN apt-get update && apt-get install -y \
@@ -18,4 +18,3 @@ COPY . .
 
 # Start the bot
 CMD ["python", "main.py"]
-
