@@ -35,8 +35,8 @@ API_HASH = "e193a0d9f0d2e422658a18447fa94d34"
 BOT_TOKEN = "8673149752:AAGdxrH3CKeqLLONJPdOcZY_TFKPcJrU0CY"
 
 # YAHAN APNI ID DALO
-OWNER_ID = 8538043097 
-SUDO_USERS = [OWNER_ID, 987654321] # Dusre sudo user ki ID yahan comma dekar likho
+OWNER_ID = 8561702588 
+SUDO_USERS = [OWNER_ID, 987654321] 
 
 app = Client("VividUploaderPremium", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN, workers=100)
 users = {}
@@ -107,9 +107,9 @@ def clean_filename(name):
 
 # ================= COMMANDS =================
 
-@app.on_message(filters.command("start"))
+@app.on_message(filters.command("start") & (filters.private | filters.group | filters.channel))
 async def start_cmd(_, message):
-    if not is_auth(message.from_user.id):
+    if not is_auth(message.from_user.id if message.from_user else OWNER_ID):
         return await message.reply_text("❌ **Access Denied.**\nContact owner for permission.")
     
     desc = (
@@ -132,7 +132,7 @@ async def get_id(_, message):
 
 @app.on_message(filters.command("cancel"))
 async def cancel_cmd(_, message):
-    if not is_auth(message.from_user.id): return
+    if not is_auth(message.from_user.id if message.from_user else OWNER_ID): return
     chat_id = message.chat.id
     if chat_id in running_tasks:
         running_tasks[chat_id] = False
@@ -142,10 +142,11 @@ async def cancel_cmd(_, message):
 
 # ================= TXT HANDLING =================
 
-@app.on_message(filters.document)
+@app.on_message(filters.document & (filters.private | filters.group | filters.channel))
 async def handle_txt(_, message):
-    # Authorization Check
-    if not is_auth(message.from_user.id):
+    # Fixed Auth Check for Channels
+    u_id = message.from_user.id if message.from_user else OWNER_ID
+    if not is_auth(u_id):
         return await message.reply_text("❌ **Access Denied.**\nContact owner for permission.")
     
     if not message.document.file_name.endswith(".txt"):
@@ -166,7 +167,8 @@ async def handle_txt(_, message):
 
 @app.on_message((filters.text | filters.photo) & ~filters.command(["start", "cancel", "id"]))
 async def steps_handler(_, message):
-    if not is_auth(message.from_user.id): return
+    u_id = message.from_user.id if message.from_user else OWNER_ID
+    if not is_auth(u_id): return
     chat_id = message.chat.id
     if chat_id not in users: return
     state = users[chat_id]
@@ -212,7 +214,7 @@ async def process_files(chat_id):
     for i, line in enumerate(links_to_process, start=1):
         if not running_tasks.get(chat_id): break
         
-        # SPEED OPTIMIZATION: AGGRESSIVE CLEANING
+        # AGGRESSIVE CACHE CLEANING
         if os.path.exists("downloads"): shutil.rmtree("downloads", ignore_errors=True)
         for f in os.listdir("."):
             if f.endswith((".mp4", ".pdf", ".jpg")) and "_vivid" in f: 
@@ -242,7 +244,7 @@ async def process_files(chat_id):
                 await app.send_document(chat_id, pdf_filename, caption=cap, thumb=custom_thumb); os.remove(pdf_filename)
             else:
                 current_q = chosen_quality
-                # Optimized Downloader for speed retention
+                # MAX SPEED ARGS
                 cmd = f'yt-dlp -f "bestvideo[height<={current_q}]+bestaudio/best[height<={current_q}]/best" --external-downloader aria2c --external-downloader-args "aria2c:-x 16 -s 16 -j 32 -k 1M" --merge-output-format mp4 --no-check-certificate "{url}" -o "{video_filename}"'
                 process = await asyncio.create_subprocess_shell(cmd); await process.communicate()
                 
