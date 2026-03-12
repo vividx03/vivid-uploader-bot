@@ -34,9 +34,10 @@ API_ID = 32799376
 API_HASH = "e193a0d9f0d2e422658a18447fa94d34" 
 BOT_TOKEN = "8673149752:AAGdxrH3CKeqLLONJPdOcZY_TFKPcJrU0CY"
 
-OWNER_ID = 8538043097 # <--- APNI ID DALO
+# YAHAN APNI ID DALO (Inhe code mein likhna hi padega permanent ke liye)
+OWNER_ID = 8538043097 
 SUDO_USERS = [OWNER_ID]
-AUTHORIZED_CHANNELS = [] # Ismein channels ki ID save hogi
+AUTHORIZED_CHANNELS = [] 
 
 app = Client("VividUploaderPremium", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN, workers=100)
 users = {}
@@ -107,7 +108,7 @@ def clean_filename(name):
 
 # ================= COMMANDS =================
 
-@app.on_message(filters.command("start") & filters.private)
+@app.on_message(filters.command("start"))
 async def start_cmd(_, message):
     if not is_auth(message.from_user.id):
         return await message.reply_text("❌ **Access Denied.**")
@@ -122,6 +123,8 @@ async def start_cmd(_, message):
         "📌 **𝗖𝗼𝗺𝗺𝗮𝗻𝗱𝘀:**\n"
         "➩ /add_channel [ID] - Add Auth Channel\n"
         "➩ /remove_channel [ID] - Remove Channel\n"
+        "➩ /add_sudo [ID] - Add Sudo User (Owner Only)\n"
+        "➩ /remove_sudo [ID] - Remove Sudo (Owner Only)\n"
         "➩ /id - Get Channel/Chat ID\n"
         "➩ /cancel - Stop processing\n\n"
         "📥 **Send me a .txt file to begin.**"
@@ -138,17 +141,26 @@ async def add_channel_cmd(_, message):
         c_id = int(message.text.split()[1])
         if c_id not in AUTHORIZED_CHANNELS:
             AUTHORIZED_CHANNELS.append(c_id)
-            await message.reply_text(f"✅ **Channel Added:** `{c_id}`")
+            await message.reply_text(f"✅ **Channel Added:** `{c_id}`\n_Note: It will work until bot restarts._")
     except: await message.reply_text("Usage: `/add_channel -100xxxxxx`")
 
-@app.on_message(filters.command("remove_channel") & filters.user(SUDO_USERS))
-async def remove_channel_cmd(_, message):
+@app.on_message(filters.command("add_sudo") & filters.user(OWNER_ID))
+async def add_sudo_cmd(_, message):
     try:
-        c_id = int(message.text.split()[1])
-        if c_id in AUTHORIZED_CHANNELS:
-            AUTHORIZED_CHANNELS.remove(c_id)
-            await message.reply_text(f"🗑 **Channel Removed.**")
-    except: await message.reply_text("Usage: `/remove_channel -100xxxxxx`")
+        u_id = int(message.text.split()[1])
+        if u_id not in SUDO_USERS:
+            SUDO_USERS.append(u_id)
+            await message.reply_text(f"✅ **User Added to Sudo:** `{u_id}`")
+    except: await message.reply_text("Usage: `/add_sudo 12345`")
+
+@app.on_message(filters.command("remove_sudo") & filters.user(OWNER_ID))
+async def remove_sudo_cmd(_, message):
+    try:
+        u_id = int(message.text.split()[1])
+        if u_id in SUDO_USERS:
+            SUDO_USERS.remove(u_id)
+            await message.reply_text(f"🗑 **User Removed from Sudo.**")
+    except: await message.reply_text("Usage: `/remove_sudo 12345`")
 
 @app.on_message(filters.command("cancel"))
 async def cancel_cmd(_, message):
@@ -164,9 +176,10 @@ async def cancel_cmd(_, message):
 
 @app.on_message(filters.document)
 async def handle_txt(_, message):
-    if not is_auth(message.from_user.id): return
-    if message.chat.id not in AUTHORIZED_CHANNELS and message.chat.type != "private":
-        return await message.reply_text("❌ **This channel is not authorized.**")
+    # Sudo users can use it anywhere, others only in authorized channels
+    if not is_auth(message.from_user.id):
+        if message.chat.id not in AUTHORIZED_CHANNELS:
+            return await message.reply_text("❌ **This channel is not authorized.**")
     
     if not message.document.file_name.endswith(".txt"):
         return await message.reply_text("❌ **TXT extension required.**")
@@ -184,7 +197,7 @@ async def handle_txt(_, message):
 
 # ================= INPUT STEPS =================
 
-@app.on_message((filters.text | filters.photo) & ~filters.command(["start", "cancel", "add_channel", "remove_channel", "id"]))
+@app.on_message((filters.text | filters.photo) & ~filters.command(["start", "cancel", "add_channel", "remove_channel", "id", "add_sudo", "remove_sudo"]))
 async def steps_handler(_, message):
     if not is_auth(message.from_user.id): return
     chat_id = message.chat.id
@@ -214,7 +227,9 @@ async def steps_handler(_, message):
         if message.photo: state["thumb"] = await message.download(file_name=f"thumb_{chat_id}.jpg")
         else: state["thumb"] = None
         for m_id in state["trash"]:
-            try: await app.delete_messages(chat_id, m_id) if isinstance(m_id, int) else os.remove(m_id)
+            try: 
+                if isinstance(m_id, int): await app.delete_messages(chat_id, m_id)
+                else: os.remove(m_id)
             except: pass
         running_tasks[chat_id] = True
         asyncio.create_task(process_files(chat_id))
@@ -229,9 +244,12 @@ async def process_files(chat_id):
 
     for i, line in enumerate(links_to_process, start=1):
         if not running_tasks.get(chat_id): break
-        # Speed Maintenance: Clear cache before each download
-        if os.path.exists("downloads"): shutil.rmtree("downloads", ignore_errors=True)
         
+        # AGGRESSIVE CLEANING FOR SPEED
+        if os.path.exists("downloads"): shutil.rmtree("downloads", ignore_errors=True)
+        for f in os.listdir("."):
+            if f.endswith((".mp4", ".pdf", ".jpg")) and "_vivid" in f: os.remove(f)
+
         try:
             if ":" in line and "http" in line:
                 parts = line.split(":", 1); topic = parts[0].strip()
@@ -255,8 +273,7 @@ async def process_files(chat_id):
                 await app.send_document(chat_id, pdf_filename, caption=cap, thumb=custom_thumb); os.remove(pdf_filename)
             else:
                 current_q = chosen_quality
-                # Aria2c arguments tuned for stability and speed
-                cmd = f'yt-dlp -f "bestvideo[height<={current_q}]+bestaudio/best[height<={current_q}]/best" --external-downloader aria2c --external-downloader-args "aria2c:-x 16 -s 16 -j 32 -k 1M --disk-cache=25M" --merge-output-format mp4 --no-check-certificate "{url}" -o "{video_filename}"'
+                cmd = f'yt-dlp -f "bestvideo[height<={current_q}]+bestaudio/best[height<={current_q}]/best" --external-downloader aria2c --external-downloader-args "aria2c:-x 16 -s 16 -j 32 -k 1M" --merge-output-format mp4 --no-check-certificate "{url}" -o "{video_filename}"'
                 process = await asyncio.create_subprocess_shell(cmd); await process.communicate()
                 
                 if os.path.exists(video_filename):
@@ -268,7 +285,6 @@ async def process_files(chat_id):
                             await app.send_video(chat_id, video=video_filename, caption=cap, duration=dur, thumb=final_thumb, supports_streaming=True, progress=progress_bar, progress_args=(status, topic, start_time, file_count_info))
                             break
                         except FloodWait as e: await asyncio.sleep(e.value)
-                    # Instant cleaning for speed retention
                     if os.path.exists(video_filename): os.remove(video_filename)
                     if auto_thumb and os.path.exists(auto_thumb): os.remove(auto_thumb)
                 else: await app.send_message(chat_id, f"❌ **Failed:** {topic}")
@@ -281,7 +297,6 @@ async def process_files(chat_id):
     await app.send_message(chat_id, "𝗧𝗵𝗮𝘁'𝘀 𝗶𝘁 ❤️")
     running_tasks.pop(chat_id, None)
 
-# --- EXECUTION ---
 async def main():
     keep_alive()
     await app.start()
