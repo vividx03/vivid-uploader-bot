@@ -35,15 +35,15 @@ API_ID = 32799376
 API_HASH = "e193a0d9f0d2e422658a18447fa94d34" 
 BOT_TOKEN = "8673149752:AAGdxrH3CKeqLLONJPdOcZY_TFKPcJrU0CY"
 
-# YAHAN APNI ID DALO
 OWNER_ID = 8538043097
-SUDO_USERS = [OWNER_ID, 987654321] 
+SUDO_USERS = [OWNER_ID, 987654321, 6061320297] 
 
-# Workers set to 300 for extreme concurrency
-app = Client("VividUploaderPremium", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN, workers=300)
+# Workers increased for high speed
+app = Client("VividUploaderPremium", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN, workers=500)
 users = {}
 running_tasks = {}
-active_processes = {} # Strictly for cancelling background tasks
+active_processes = {} 
+last_update_time = {} 
 
 # ================= AUTH CHECK =================
 
@@ -56,15 +56,16 @@ def is_auth(message):
 # ================= UTILITIES =================
 
 async def progress_bar(current, total, status_msg, topic, start_time, file_count_info, chat_id):
-    # Strictly stop uploading progress if cancelled
     if not running_tasks.get(chat_id):
         raise Exception("Task Cancelled")
         
     now = time.time()
-    diff = now - start_time
-    if round(diff % 5.0) == 0 or current == total:
+    last_time = last_update_time.get(chat_id, 0)
+    # 30-sec throttle to prevent FloodWait
+    if (now - last_time) >= 30 or current == total:
+        last_update_time[chat_id] = now
         percentage = current * 100 / total
-        speed = current / diff if diff > 0 else 0
+        speed = current / (now - start_time) if (now - start_time) > 0 else 0
         eta = round((total - current) / speed) * 1000 if speed > 0 else 0
         bar_length = 15
         filled_length = int(bar_length * current / total)
@@ -119,18 +120,8 @@ def clean_filename(name):
 
 @app.on_message(filters.command("start"))
 async def start_cmd(_, message):
-    if not is_auth(message):
-        return await message.reply_text("❌ **Access Denied.**")
-    
-    desc = (
-        "⚡ **𝗩𝗜𝗩𝗜𝗗 𝗧𝗫𝗧 𝗨𝗣𝗟𝗢𝗔𝗗𝗘𝗥 𝘃𝟯.𝟱**\n"
-        "━━━━━━━━━━━━━━━━━━━━━━\n"
-        "◈ **Mode:** Turbo Multi-Tasking\n"
-        "◈ **Downloader:** Aria2c Turbo\n"
-        "◈ **Status:** Authorized ✅\n\n"
-        "📥 **Send me a .txt file.**"
-    )
-    await message.reply_text(desc)
+    if not is_auth(message): return
+    await message.reply_text("⚡ **𝗩𝗜𝗩𝗜𝗗 𝗧𝗨𝗥𝗕𝗢 𝗨𝗣𝗟𝗢𝗔𝗗𝗘𝗥**\n\nParallel processing online. Send me your .txt file.")
 
 @app.on_message(filters.command("id"))
 async def get_id(_, message):
@@ -138,11 +129,10 @@ async def get_id(_, message):
 
 @app.on_message(filters.command("cancel"))
 async def cancel_cmd(_, message):
-    if not is_auth(message): return
+    if message.from_user and message.from_user.id not in SUDO_USERS: return
     chat_id = message.chat.id
     if chat_id in running_tasks:
         running_tasks[chat_id] = False
-        # STRICT KILL: Kill the background yt-dlp/aria2c process
         if chat_id in active_processes:
             try:
                 active_processes[chat_id].terminate()
@@ -167,7 +157,7 @@ async def handle_txt(_, message):
     vids = len([l for l in links if any(x in l.lower() for x in [".m3u8", ".mp4", "youtu"])])
     pdfs = len([l for l in links if ".pdf" in l.lower()])
     users[chat_id] = {"links": links, "step": "index", "total_v": vids, "total_p": pdfs, "trash": [message.id, path]}
-    msg = await message.reply_text(f"📊 **𝗗𝗔𝗧𝗔 𝗔𝗡𝗔𝗟𝗬𝗦𝗜𝗦**\n━━━━━━━━━━━━━━━━━━━━━━\n✅ **𝗧𝗼𝘁𝗮𝗹:** `{len(links)}` \n📹 **𝗩𝗶𝗱𝗲𝗼𝘀:** `{vids}` \n📄 **𝗣𝗗𝗙𝘀:** `{pdfs}`\n\n🔢 **𝗘𝗻𝘁𝗲𝗿 𝘀𝘁𝗮𝗿𝘁𝗶𝗻𝗴 𝗶𝗻𝗱𝗲𝘅:**")
+    msg = await message.reply_text(f"📊 **𝗗𝗔𝗧𝗔 𝗔𝗡𝗔𝗟𝗬𝗦𝗜𝗦**\n📹 **𝗩𝗶𝗱𝗲𝗼𝘀:** `{vids}` \n📄 **𝗣𝗗𝗙𝘀:** `{pdfs}`\n\n🔢 **𝗘𝗻𝘁𝗲𝗿 𝘀𝘁𝗮𝗿𝘁𝗶𝗻𝗴 𝗶𝗻𝗱𝗲𝘅:**")
     users[chat_id]["trash"].append(msg.id)
 
 # ================= INPUT STEPS =================
@@ -193,11 +183,11 @@ async def steps_handler(_, message):
     elif state["step"] == "extracted":
         state["extracted"] = message.text; state["step"] = "quality"
         kb = ReplyKeyboardMarkup([["360p", "480p"], ["720p", "1080p"]], resize_keyboard=True)
-        msg = await message.reply_text("⚙️ **𝗦𝗲𝗹𝗲𝗰𝘁 𝗥𝗲𝘀𝗼𝗹𝘂𝘁𝗶𝗼𝘁𝗻:**", reply_markup=kb)
+        msg = await message.reply_text("⚙️ **𝗦𝗲𝗹𝗲𝗰𝘁 𝗤𝘂𝗮𝗹𝗶𝘁𝘆:**", reply_markup=kb)
         state["trash"].append(msg.id)
     elif state["step"] == "quality":
         state["quality"] = message.text.replace("p", ""); state["step"] = "thumb"
-        msg = await message.reply_text("🖼 **𝗨𝗽𝗹𝗼𝗮𝗱 𝗖𝘂𝘀𝘁𝗼𝗺 𝗧𝗵𝘂𝗺𝗯𝗻𝗮𝗶𝗹** or 'no':", reply_markup=ReplyKeyboardRemove())
+        msg = await message.reply_text("🖼 **𝗦𝗲𝗻𝗱 𝗧𝗵𝘂𝗺𝗯𝗻𝗮𝗶𝗹** or 'no':", reply_markup=ReplyKeyboardRemove())
         state["trash"].append(msg.id)
     elif state["step"] == "thumb":
         if message.photo: state["thumb"] = await message.download(file_name=f"thumb_{chat_id}.jpg")
@@ -216,26 +206,31 @@ async def process_files(chat_id):
     state = users[chat_id]; all_links = state["links"]; start_idx = state["index"]
     links_to_process = all_links[start_idx-1:]; total_to_process = len(links_to_process)
     curr_idx = start_idx; custom_thumb = state["thumb"]; chosen_quality = state["quality"]
+    failed_links_data = [] # To store specific report data
+    
     status = await app.send_message(chat_id, "⚙️ **𝗜𝗡𝗜𝗧𝗜𝗔𝗧𝗜𝗡𝗚 𝗦𝗘𝗤𝗨𝗘𝗡𝗖𝗘...**")
 
     for i, line in enumerate(links_to_process, start=1):
         if not running_tasks.get(chat_id): break
         
-        if os.path.exists(f"downloads_{chat_id}"): shutil.rmtree(f"downloads_{chat_id}", ignore_errors=True)
+        work_dir = f"vivid_{chat_id}"
+        if not os.path.exists(work_dir): os.makedirs(work_dir)
 
         try:
             if ":" in line and "http" in line:
                 parts = line.split(":", 1); topic = parts[0].strip()
                 url = re.search(r'http\S+', parts[1]).group()
             else: topic = f"File_{curr_idx}"; url = re.search(r'http\S+', line).group()
-        except: curr_idx += 1; continue
+        except: 
+            failed_links_data.append(f"index no : {curr_idx}\nTopic name : {line}\nFailed link : Not Found")
+            curr_idx += 1; continue
 
         file_count_info = f"{i}/{total_to_process}"
         await update_status(status, f"🛰 **𝗗𝗢𝗪𝗡𝗟𝗢𝗔𝗗𝗜𝗡𝗚 ({file_count_info})**\n📂 `{topic}`")
         
         safe_topic = clean_filename(topic)
-        video_filename = f"{safe_topic}_vivid.mp4"
-        pdf_filename = f"{safe_topic}_vivid.pdf"
+        video_filename = os.path.join(work_dir, f"{safe_topic}_vivid.mp4")
+        pdf_filename = os.path.join(work_dir, f"{safe_topic}_vivid.pdf")
         cap = (f"📙 **Index :** `{curr_idx}`\n\n📝 **Topic :** `{topic}`\n\n📚 **COURSE :-** `{state['batch']}`\n\n📤 **𝐄𝐗𝐓𝐑𝐀𝐂𝐓𝐄𝐃 𝐁𝐘 : {state['extracted']}**")
 
         try:
@@ -249,43 +244,49 @@ async def process_files(chat_id):
                 await app.send_document(chat_id, pdf_filename, caption=cap, thumb=custom_thumb)
                 if os.path.exists(pdf_filename): os.remove(pdf_filename)
             else:
-                cmd = f'yt-dlp -f "bestvideo[height<={chosen_quality}]+bestaudio/best" --external-downloader aria2c --external-downloader-args "aria2c:-x 16 -s 16 -j 32 -k 1M --min-split-size=1M" --merge-output-format mp4 --no-check-certificate "{url}" -o "{video_filename}"'
-                
-                # Registering process for Strict Cancel
+                cmd = f'yt-dlp -f "bestvideo[height<={chosen_quality}]+bestaudio/best" --external-downloader aria2c --external-downloader-args "aria2c:-x 16 -s 16 -j 16 -k 1M" --merge-output-format mp4 --no-check-certificate "{url}" -o "{video_filename}"'
                 process = await asyncio.create_subprocess_shell(cmd)
                 active_processes[chat_id] = process
                 await process.communicate()
                 active_processes.pop(chat_id, None)
                 
-                if not running_tasks.get(chat_id): break # Double check after download
+                if not running_tasks.get(chat_id): break
 
                 if os.path.exists(video_filename):
                     dur, auto_thumb = get_video_info(video_filename)
                     final_thumb = custom_thumb if custom_thumb else auto_thumb
                     start_time = time.time()
-                    
-                    while True:
-                        try:
-                            # Pass chat_id to progress_bar for cancel check
-                            await app.send_video(chat_id, video=video_filename, caption=cap, duration=dur, thumb=final_thumb, supports_streaming=True, progress=progress_bar, progress_args=(status, topic, start_time, file_count_info, chat_id))
-                            break
-                        except Exception as e:
-                            if "Task Cancelled" in str(e): break
-                            if isinstance(e, FloodWait): await asyncio.sleep(e.value)
-                            else: break
-                    
+                    try:
+                        await app.send_video(chat_id, video=video_filename, caption=cap, duration=dur, thumb=final_thumb, supports_streaming=True, progress=progress_bar, progress_args=(status, topic, start_time, file_count_info, chat_id))
+                    except: pass
                     if os.path.exists(video_filename): os.remove(video_filename)
                     if auto_thumb and os.path.exists(auto_thumb): os.remove(auto_thumb)
                 else: 
-                    if running_tasks.get(chat_id): await app.send_message(chat_id, f"❌ **Failed:** {topic}")
+                    failed_links_data.append(f"index no : {curr_idx}\nTopic name : {topic}\nFailed link : {url}")
         except Exception as e: 
-            if running_tasks.get(chat_id): await app.send_message(chat_id, f"⚠️ **Error:** `{str(e)[:100]}`")
+            failed_links_data.append(f"index no : {curr_idx}\nTopic name : {topic}\nFailed link : {url}")
         
         curr_idx += 1
+        shutil.rmtree(work_dir, ignore_errors=True)
 
     if custom_thumb and os.path.exists(custom_thumb): os.remove(custom_thumb)
     try: await status.delete()
     except: pass
+    
+    # REQUIREMENT: Proper Failed Links Report
+    if failed_links_data:
+        report_text = "❌ **FAILED LINKS REPORT**\n━━━━━━━━━━━━━━\n\n"
+        for item in failed_links_data:
+            report_text += f"{item}\n\n"
+        
+        # Split report if too long for Telegram
+        if len(report_text) > 4000:
+            with open(f"failed_{chat_id}.txt", "w") as f: f.write(report_text)
+            await app.send_document(chat_id, f"failed_{chat_id}.txt", caption="❌ **Failed Links Report File**")
+            os.remove(f"failed_{chat_id}.txt")
+        else:
+            await app.send_message(chat_id, report_text)
+        
     if running_tasks.get(chat_id):
         await app.send_message(chat_id, "𝗧𝗵𝗮𝘁'𝘀 𝗶𝘁 ❤️")
     running_tasks.pop(chat_id, None)
@@ -293,7 +294,7 @@ async def process_files(chat_id):
 async def main():
     keep_alive()
     await app.start()
-    print("💎 VIVID TURBO CORE IS ONLINE (CANCEL FIXED)")
+    print("💎 VIVID TURBO PARALLEL ONLINE")
     await idle()
 
 if __name__ == "__main__":
