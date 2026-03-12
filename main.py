@@ -35,7 +35,7 @@ API_ID = 32799376
 API_HASH = "e193a0d9f0d2e422658a18447fa94d34" 
 BOT_TOKEN = "8673149752:AAGdxrH3CKeqLLONJPdOcZY_TFKPcJrU0CY"
 
-OWNER_ID = 8538043097 
+OWNER_ID = 8538043097
 SUDO_USERS = [OWNER_ID, 987654321, 6061320297] 
 
 app = Client("VividUploaderPremium", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN, workers=300)
@@ -60,7 +60,6 @@ async def progress_bar(current, total, status_msg, topic, start_time, file_count
         
     now = time.time()
     last_time = last_update_time.get(chat_id, 0)
-    # FIX: 30 Second Status Update
     if (now - last_time) >= 30 or current == total:
         last_update_time[chat_id] = now
         percentage = current * 100 / total
@@ -138,7 +137,6 @@ async def get_id(_, message):
 
 @app.on_message(filters.command("cancel"))
 async def cancel_cmd(_, message):
-    # FIX: Allow cancel in groups for sudo users even if from_user is None
     if message.from_user and message.from_user.id not in SUDO_USERS: return
     
     chat_id = message.chat.id
@@ -223,7 +221,6 @@ async def process_files(chat_id):
     for i, line in enumerate(links_to_process, start=1):
         if not running_tasks.get(chat_id): break
         
-        # FIX: Independent directory for concurrency
         work_dir = f"vivid_{chat_id}"
         if not os.path.exists(work_dir): os.makedirs(work_dir)
 
@@ -233,7 +230,8 @@ async def process_files(chat_id):
                 url = re.search(r'http\S+', parts[1]).group()
             else: topic = f"File_{curr_idx}"; url = re.search(r'http\S+', line).group()
         except: 
-            failed_links_report.append(f"index no : {curr_idx}\ntopic name : {line}\nfailed link : Invalid Link")
+            # FIX: Index management for failed extractions
+            failed_links_report.append(f"index no : {curr_idx}\ntopic name : {line}\nfailed link : Not Extracted")
             curr_idx += 1; continue
 
         file_count_info = f"{i}/{total_to_process}"
@@ -270,11 +268,12 @@ async def process_files(chat_id):
                         await app.send_video(chat_id, video=video_filename, caption=cap, duration=dur, thumb=final_thumb, supports_streaming=True, progress=progress_bar, progress_args=(status, topic, start_time, file_count_info, chat_id))
                     except: pass
                 else: 
-                    # FIX: Failed Link Report format
+                    # FIX: Link failed to download, adding to report
                     failed_links_report.append(f"index no : {curr_idx}\ntopic name : {topic}\nfailed link : {url}")
         except Exception as e: 
             failed_links_report.append(f"index no : {curr_idx}\ntopic name : {topic}\nfailed link : {url}")
         
+        # SUCCESS OR FAIL: Always increment index and cleanup
         curr_idx += 1
         shutil.rmtree(work_dir, ignore_errors=True)
 
@@ -282,7 +281,6 @@ async def process_files(chat_id):
     try: await status.delete()
     except: pass
 
-    # REQUIREMENT: Failed Report Posting
     if failed_links_report:
         report_msg = "❌ **FAILED LINKS REPORT**\n\n" + "\n\n".join(failed_links_report)
         if len(report_msg) > 4000:
