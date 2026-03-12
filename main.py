@@ -39,7 +39,9 @@ OWNER_ID = 8538043097
 SUDO_USERS = [OWNER_ID, 987654321, 6061320297] 
 
 app = Client("VividUploaderPremium", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN, workers=300)
-users = {}
+
+# Multi-Group Fix: Sab kuch chat_id ke hisab se alag rahega
+users_data = {} 
 running_tasks = {}
 active_processes = {} 
 last_update_time = {}
@@ -59,6 +61,9 @@ async def progress_bar(current, total, status_msg, topic, start_time, file_count
         raise Exception("Task Cancelled")
         
     now = time.time()
+    # Har chat ka apna last update time
+    if chat_id not in last_update_time: last_update_time[chat_id] = 0
+    
     last_time = last_update_time.get(chat_id, 0)
     if (now - last_time) >= 30 or current == total:
         last_update_time[chat_id] = now
@@ -146,6 +151,7 @@ async def cancel_cmd(_, message):
             try:
                 active_processes[chat_id].terminate()
                 active_processes[chat_id].kill()
+                active_processes.pop(chat_id)
             except: pass
         await message.reply_text("🛑 **𝗣𝗥𝗢𝗖𝗘𝗦𝗦 𝗧𝗘𝗥𝗠𝗜𝗡𝗔𝗧𝗘𝗗.**")
     else:
@@ -165,9 +171,12 @@ async def handle_txt(_, message):
     links = [l.strip() for l in content.splitlines() if "http" in l]
     vids = len([l for l in links if any(x in l.lower() for x in [".m3u8", ".mp4", "youtu"])])
     pdfs = len([l for l in links if ".pdf" in l.lower()])
-    users[chat_id] = {"links": links, "step": "index", "total_v": vids, "total_p": pdfs, "trash": [message.id, path]}
+    
+    # Per-chat storage
+    users_data[chat_id] = {"links": links, "step": "index", "total_v": vids, "total_p": pdfs, "trash": [message.id, path]}
+    
     msg = await message.reply_text(f"📊 **𝗗𝗔𝗧𝗔 𝗔𝗡𝗔𝗟𝗬𝗦𝗜𝗦**\n━━━━━━━━━━━━━━━━━━━━━━\n✅ **𝗧𝗼𝘁𝗮𝗹:** `{len(links)}` \n📹 **𝗩𝗶𝗱𝗲𝗼𝘀:** `{vids}` \n📄 **𝗣𝗗𝗙𝘀:** `{pdfs}`\n\n🔢 **𝗘𝗻𝘁𝗲𝗿 𝘀𝘁𝗮𝗿𝘁𝗶𝗻𝗴 𝗶𝗻𝗱𝗲𝘅:**")
-    users[chat_id]["trash"].append(msg.id)
+    users_data[chat_id]["trash"].append(msg.id)
 
 # ================= INPUT STEPS =================
 
@@ -175,8 +184,8 @@ async def handle_txt(_, message):
 async def steps_handler(_, message):
     if not is_auth(message): return
     chat_id = message.chat.id
-    if chat_id not in users: return
-    state = users[chat_id]
+    if chat_id not in users_data: return
+    state = users_data[chat_id]
     state["trash"].append(message.id)
     
     if state["step"] == "index":
@@ -201,26 +210,31 @@ async def steps_handler(_, message):
     elif state["step"] == "thumb":
         if message.photo: state["thumb"] = await message.download(file_name=f"thumb_{chat_id}.jpg")
         else: state["thumb"] = None
+        
+        # Local cleanup
         for m_id in state["trash"]:
             try: 
                 if isinstance(m_id, int): await app.delete_messages(chat_id, m_id)
                 else: os.remove(m_id)
             except: pass
+            
         running_tasks[chat_id] = True
-        asyncio.create_task(process_files(chat_id))
+        asyncio.create_task(process_files(chat_id, state))
 
 # ================= CORE ENGINE =================
 
-async def process_files(chat_id):
-    state = users[chat_id]; all_links = state["links"]; start_idx = state["index"]
+async def process_files(chat_id, state):
+    all_links = state["links"]; start_idx = state["index"]
     links_to_process = all_links[start_idx-1:]; total_to_process = len(links_to_process)
     curr_idx = start_idx; custom_thumb = state["thumb"]; chosen_quality = state["quality"]
+    
     status = await app.send_message(chat_id, "⚙️ **𝗜𝗡𝗜𝗧𝗜𝗔𝗧𝗜𝗡𝗚 𝗦𝗘𝗤𝗨𝗘𝗡𝗖𝗘...**")
 
     for i, line in enumerate(links_to_process, start=1):
         if not running_tasks.get(chat_id): break
         
-        work_dir = f"vivid_{chat_id}"
+        # Har chat ke liye alag work directory taaki files mix na ho
+        work_dir = f"vivid_{chat_id}_{curr_idx}"
         if not os.path.exists(work_dir): os.makedirs(work_dir)
 
         try:
@@ -229,7 +243,6 @@ async def process_files(chat_id):
                 url = re.search(r'http\S+', parts[1]).group()
             else: topic = f"File_{curr_idx}"; url = re.search(r'http\S+', line).group()
         except: 
-            # Instant Failed message for invalid links
             failed_text = f"❌ **FAILED LINKS REPORT**\n\n📙 **Index :** `{curr_idx}`\n\n📝 **Topic :** `{line}`\n\n🔗 **Failed Link :** `Invalid URL Format`"
             await app.send_message(chat_id, failed_text)
             curr_idx += 1; continue
@@ -244,7 +257,7 @@ async def process_files(chat_id):
 
         try:
             if any(x in url.lower() for x in [".jpg", ".png", ".jpeg"]):
-                r = requests.get(url, timeout=30); img_path = f"{safe_topic}_vivid.jpg"
+                r = requests.get(url, timeout=30); img_path = os.path.join(work_dir, f"{safe_topic}.jpg")
                 with open(img_path, "wb") as f: f.write(r.content)
                 await app.send_photo(chat_id, img_path, caption=cap); os.remove(img_path)
             elif ".pdf" in url.lower():
@@ -268,11 +281,9 @@ async def process_files(chat_id):
                         await app.send_video(chat_id, video=video_filename, caption=cap, duration=dur, thumb=final_thumb, supports_streaming=True, progress=progress_bar, progress_args=(status, topic, start_time, file_count_info, chat_id))
                     except: pass
                 else: 
-                    # Instant Failed message if download fails
                     failed_text = f"❌ **FAILED LINKS REPORT**\n\n📙 **Index :** `{curr_idx}`\n\n📝 **Topic :** `{topic}`\n\n🔗 **Failed Link :** `{url}`"
                     await app.send_message(chat_id, failed_text)
-        except Exception as e: 
-            # Instant Failed message for exceptions
+        except Exception: 
             failed_text = f"❌ **FAILED LINKS REPORT**\n\n📙 **Index :** `{curr_idx}`\n\n📝 **Topic :** `{topic}`\n\n🔗 **Failed Link :** `{url}`"
             await app.send_message(chat_id, failed_text)
         
