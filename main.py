@@ -31,11 +31,11 @@ def keep_alive():
 nest_asyncio.apply()
 
 # --- CONFIG ---
-API_ID = 32799376
-API_HASH = "e193a0d9f0d2e422658a18447fa94d34" 
-BOT_TOKEN = "8673149752:AAGdxrH3CKeqLLONJPdOcZY_TFKPcJrU0CY"
+API_ID = 
+API_HASH = "" 
+BOT_TOKEN = ""
 
-OWNER_ID = 8538043097
+OWNER_ID = 
 SUDO_USERS = [OWNER_ID, 987654321, 6061320297] 
 
 app = Client("VividUploaderPremium", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN, workers=300)
