@@ -31,7 +31,6 @@ def keep_alive():
 nest_asyncio.apply()
 
 # --- CONFIG (SECURED) ---
-# Yahan hum os.getenv use kar rahe hain taaki details variables se load hon
 API_ID = int(os.getenv("API_ID", "0"))
 API_HASH = os.getenv("API_HASH", "")
 BOT_TOKEN = os.getenv("BOT_TOKEN", "")
@@ -41,7 +40,6 @@ SUDO_USERS = [OWNER_ID, 987654321, 6061320297]
 
 app = Client("VividUploaderPremium", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN, workers=300)
 
-# Multi-Group Fix: Sab kuch chat_id ke hisab se alag rahega
 users_data = {} 
 running_tasks = {}
 active_processes = {} 
@@ -62,11 +60,11 @@ async def progress_bar(current, total, status_msg, topic, start_time, file_count
         raise Exception("Task Cancelled")
         
     now = time.time()
-    # Har chat ka apna last update time
     if chat_id not in last_update_time: last_update_time[chat_id] = 0
     
     last_time = last_update_time.get(chat_id, 0)
-    if (now - last_time) >= 30 or current == total:
+    # UPDATED: 15 Seconds Flood Protection (As requested)
+    if (now - last_time) >= 15 or current == total:
         last_update_time[chat_id] = now
         percentage = current * 100 / total
         speed = current / (now - start_time) if (now - start_time) > 0 else 0
@@ -173,7 +171,6 @@ async def handle_txt(_, message):
     vids = len([l for l in links if any(x in l.lower() for x in [".m3u8", ".mp4", "youtu"])])
     pdfs = len([l for l in links if ".pdf" in l.lower()])
     
-    # Per-chat storage
     users_data[chat_id] = {"links": links, "step": "index", "total_v": vids, "total_p": pdfs, "trash": [message.id, path]}
     
     msg = await message.reply_text(f"📊 **𝗗𝗔𝗧𝗔 𝗔𝗡𝗔𝗟𝗬𝗦𝗜𝗦**\n━━━━━━━━━━━━━━━━━━━━━━\n✅ **𝗧𝗼𝘁𝗮𝗹:** `{len(links)}` \n📹 **𝗩𝗶𝗱𝗲𝗼𝘀:** `{vids}` \n📄 **𝗣𝗗𝗙𝘀:** `{pdfs}`\n\n🔢 **𝗘𝗻𝘁𝗲𝗿 𝘀𝘁𝗮𝗿𝘁𝗶𝗻𝗴 𝗶𝗻𝗱𝗲𝘅:**")
@@ -212,7 +209,6 @@ async def steps_handler(_, message):
         if message.photo: state["thumb"] = await message.download(file_name=f"thumb_{chat_id}.jpg")
         else: state["thumb"] = None
         
-        # Local cleanup
         for m_id in state["trash"]:
             try: 
                 if isinstance(m_id, int): await app.delete_messages(chat_id, m_id)
@@ -234,7 +230,6 @@ async def process_files(chat_id, state):
     for i, line in enumerate(links_to_process, start=1):
         if not running_tasks.get(chat_id): break
         
-        # Har chat ke liye alag work directory taaki files mix na ho
         work_dir = f"vivid_{chat_id}_{curr_idx}"
         if not os.path.exists(work_dir): os.makedirs(work_dir)
 
@@ -266,7 +261,8 @@ async def process_files(chat_id, state):
                 with open(pdf_filename, "wb") as f: f.write(r.content)
                 await app.send_document(chat_id, pdf_filename, caption=cap, thumb=custom_thumb)
             else:
-                cmd = f'yt-dlp -f "bestvideo[height<={chosen_quality}]+bestaudio/best" --external-downloader aria2c --external-downloader-args "aria2c:-x 16 -s 16 -j 32 -k 1M --min-split-size=1M" --merge-output-format mp4 --no-check-certificate "{url}" -o "{video_filename}"'
+                # EXTREME SPEED SETTINGS (aria2c connections increased)
+                cmd = f'yt-dlp -f "bestvideo[height<={chosen_quality}]+bestaudio/best" --external-downloader aria2c --external-downloader-args "aria2c:-x 16 -s 16 -j 32 -k 1M --min-split-size=1M --max-connection-per-server=16 --split=16" --merge-output-format mp4 --no-check-certificate "{url}" -o "{video_filename}"'
                 process = await asyncio.create_subprocess_shell(cmd)
                 active_processes[chat_id] = process
                 await process.communicate()
