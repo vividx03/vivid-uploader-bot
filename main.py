@@ -30,12 +30,13 @@ def keep_alive():
 
 nest_asyncio.apply()
 
-# --- CONFIG ---
-API_ID = 
-API_HASH = "" 
-BOT_TOKEN = ""
+# --- CONFIG (SECURED) ---
+# Yahan hum os.getenv use kar rahe hain taaki details variables se load hon
+API_ID = int(os.getenv("API_ID", "0"))
+API_HASH = os.getenv("API_HASH", "")
+BOT_TOKEN = os.getenv("BOT_TOKEN", "")
 
-OWNER_ID = 
+OWNER_ID = int(os.getenv("OWNER_ID", "0"))
 SUDO_USERS = [OWNER_ID, 987654321, 6061320297] 
 
 app = Client("VividUploaderPremium", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN, workers=300)
